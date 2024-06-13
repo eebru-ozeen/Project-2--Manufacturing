@@ -1,0 +1,75 @@
+import simpy
+import random
+import pandas as pd
+
+class ManufacturingLine:
+    def __init__(self, env):
+        self.env = env
+        self.machine = simpy.Resource(env, capacity=10)
+        self.assembly = simpy.Resource(env, capacity=5)
+        self.inspection = simpy.Resource(env, capacity=3)
+        self.packaging = simpy.Resource(env, capacity=2)
+        self.shift_end = 8*60*60
+        self.results = []
+
+    def process(self, name, time):
+        start_time = self.env.now
+        yield self.env.timeout(time)
+        end_time = self.env.now
+        self.results.append((name, start_time, end_time))
+        print(f'{name} completed at {end_time}')
+
+def machine_process(env, line, name):
+    with line.machine.request() as request:
+        yield request
+        if random.random() < 0.1:  # %10 arıza oranı
+            yield env.timeout(30*60)  # 30 dakika bakım süresi
+        yield env.process(line.process(f'Machining {name}', 30*60))
+
+def assembly_process(env, line, name):
+    with line.assembly.request() as request:
+        yield request
+        yield env.process(line.process(f'Assembling {name}', 20*60))
+
+def inspection_process(env, line, name):
+    with line.inspection.request() as request:
+        yield request
+        yield env.process(line.process(f'Inspecting {name}', 10*60))
+
+def packaging_process(env, line, name):
+    with line.packaging.request() as request:
+        yield request
+        yield env.process(line.process(f'Packaging {name}', 15*60))
+
+def product_process(env, line, name):
+    yield env.process(machine_process(env, line, name))
+    yield env.process(assembly_process(env, line, name))
+    yield env.process(inspection_process(env, line, name))
+    yield env.process(packaging_process(env, line, name))
+
+def production_line(env, line):
+    i = 0
+    while env.now < line.shift_end:
+        i += 1
+        env.process(product_process(env, line, f'Product {i}'))
+        yield env.timeout(random.randint(20*60, 40*60))  # Ham madde girişi sıklığı
+
+env = simpy.Environment()
+line = ManufacturingLine(env)
+env.process(production_line(env, line))
+env.run(until=8*60*60)
+
+# Simülasyon sonuçlarını analiz etme
+df = pd.DataFrame(line.results, columns=['Process', 'Start Time', 'End Time'])
+print(df.describe())
+
+# İşlemler arası geçiş süreleri ve performans değerlendirmesi
+df['Duration'] = df['End Time'] - df['Start Time']
+print(df)
+
+# Performans metriklerini hesaplama
+average_time_per_process = df['Duration'].mean()
+total_products_completed = len(df['Process'].unique())
+
+print(f'Average time per process: {average_time_per_process}')
+print(f'Total products completed: {total_products_completed}')
